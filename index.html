@@ -1,0 +1,177 @@
+<html>
+  <head>
+    <script>
+      var config = {
+        webservice : "http://localhost:4567"
+      }
+      
+        function log(msg){
+        
+        }
+
+        console.log = log;
+    </script>
+    
+  
+    
+    <script type="text/javascript" src="js/MochiKit/MochiKit.js" ></script>
+    <script type="text/javascript" src="js/sendJSONPRequest.js" ></script>
+
+   <script type="text/javascript" src="js/jsUtils.js" ></script>
+  
+    <script type="text/javascript" src="js/utils/databean.js" ></script>
+    <script type="text/javascript" src="js/data/datasource.js" ></script>
+    <script type="text/javascript" src="js/data/webservice.js" ></script>
+    <script type="text/javascript" src="js/data/github/user_info_datasource.js" ></script>
+    <script type="text/javascript" src="js/data/github/commits_datasource.js" ></script>    
+    <!--Load the AJAX API-->
+    <script type="text/javascript" src="http://www.google.com/jsapi"></script>
+
+    <script type="text/javascript">
+      google.load("visualization", "1", {packages:["areachart"]});
+      google.setOnLoadCallback(function(){
+        isGoogleReady=true;
+      });
+
+        var isGoogleReady = false;
+        var isDataReady = false;
+
+        var repos = [];
+        var reposIdx  = {};
+        
+        var currentRepo = 0;
+        
+        var userData = new data.github.UserInfoDatasource("gingerhendrix");
+
+        var numBuckets = 24;
+
+        function getBucket(date){
+          var now = new Date();
+          return (numBuckets-1) - monthsBetween(now, date);
+        }
+        
+        function monthsBetween(date1, date2){
+          var nowMonth = date1.getMonth();
+          var nowYear = date1.getFullYear();
+          
+          var bucketMonth = date2.getMonth();
+          var bucketYear = date2.getFullYear();
+          
+          var yearDiff = nowYear - bucketYear;
+          var monthDiff = nowMonth - bucketMonth;
+          
+          return (yearDiff*12) + monthDiff;
+        }
+        
+        function getBucketNames(){
+           var names = [];
+           var now = new Date();
+           var month = now.getMonth();
+           var year = now.getFullYear();
+           var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+           for(var i=numBuckets-1; i>=0; i--){
+             names[i] = monthNames[month] + " " + year;
+             month--;
+             if(month < 0){
+               month = 11;
+               year--;
+             }
+           }
+           return names;
+        }
+
+        function getNextProject(){
+
+          var repo = repos[currentRepo];
+          var pjData = new data.github.CommitsDatasource("gingerhendrix", repo.name); //TODO: Write this class and the service behind it
+          pjData.update();
+          
+          pjData.connect("commits", this, 
+            function(commits){
+              repo.commits = commits;
+              repo.bucketCommits = [];
+                log("Processing "+repo.name + " " + commits.length + "commits");
+              
+              for(var i=0; i<commits.length; i++){
+                var datestring = commits[i].committed_date;
+                log("Parsing datestring " + datestring );
+                var date = new Date(datestring);
+                log("Processing  " + date + " into bucket " + date.getMonth() );
+                var bucket = getBucket(date);
+                if(bucket > 0){
+                  if ( !repo.bucketCommits[bucket] ){
+                    repo.bucketCommits[bucket] = 1;
+                  }else{
+                    repo.bucketCommits[bucket] += 1;
+                  }              
+                }
+              }
+             // alert("Buckets: " + repo.bucketCommits.toSource()); 
+              
+              currentRepo++;
+              if(currentRepo<repos.length){
+                getNextProject();
+              }else{
+                isDataReady = true;
+                if(isGoogleReady){
+                  drawChart();  
+                }
+              }  
+            }
+          );
+       }
+
+        userData.connect("user_info", this, function(info){
+          log("Got user info");
+          log("" + info.repositories.length + " repositories");
+
+          for(var i=0; i < info.repositories.length; i++){
+            repos[i] = { name : info.repositories[i].name,
+                         url :  info.repositories[i].url,
+                         weeklyCommits : [] };
+            reposIdx[repos[i].name] = i;
+          }
+
+          getNextProject();
+
+        });
+        
+
+
+    
+        function drawChart(){
+          var data = new google.visualization.DataTable();
+          data.addRows(numBuckets);
+          data.addColumn("string", 'title'); 
+          var bucketNames = getBucketNames();
+          for (var i=0; i < numBuckets; i++){
+            data.setValue(i, 0, bucketNames[i] );
+          }
+          for (var i=0; i < repos.length; i++){
+            data.addColumn("number", repos[i].name); 
+            for(var j=0; j < repos[i].bucketCommits.length; j++){
+               data.setValue(j, i+1, repos[i].bucketCommits[j] );
+            }
+          }
+
+
+          var chart = new google.visualization.AreaChart(document.getElementById('chart_div'));
+          chart.draw(data, {width: 1600, height: 400, legend: 'bottom', isStacked : true, title: 'Github Activity'});
+
+        }
+        
+        userData.update();
+        
+        
+
+    </script>
+    
+  </head>
+
+  <body>
+    <!--Div that will hold the pie chart-->
+    <div id="chart_div"></div>
+    
+    <div id="log"></div>
+  </body>
+</html>
